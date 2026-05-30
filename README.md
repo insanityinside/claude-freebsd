@@ -113,10 +113,29 @@ so. To suppress it:
 export CLAUDE_FBSD_NO_NOTIFY=1
 ```
 
-### Tracking the stable channel
+### Selecting a release channel
+
+The channel choice is **persistent** — setting it once with `--channel` saves
+it to `/usr/local/share/claude-freebsd/channel` and becomes the default for all
+future `--update` runs and the per-launch update nudge. You do not need to pass
+`--channel` again unless you want to switch.
+
+Install on the stable channel:
+
+```sh
+sudo claude-freebsd --install --channel stable
+```
+
+Switch to stable after an existing install:
 
 ```sh
 sudo claude-freebsd --update --channel stable
+```
+
+Switch back to latest:
+
+```sh
+sudo claude-freebsd --update --channel latest
 ```
 
 ### Pinning a specific version

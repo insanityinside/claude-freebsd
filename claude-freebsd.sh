@@ -28,7 +28,7 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.5"
+SCRIPT_VERSION="1.0.6"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
@@ -150,8 +150,9 @@ if [ "$_do_nudge" -eq 1 ] && [ -z "${CLAUDE_FBSD_NO_NOTIFY:-}" ] && [ -t 2 ]; th
     fi
     if [ "$_do" -eq 1 ]; then
         (
+            _channel=$(cat /usr/local/share/claude-freebsd/channel 2>/dev/null || echo latest)
             _latest=$(fetch -qT2 -o - \
-                https://downloads.claude.ai/claude-code-releases/latest \
+                "https://downloads.claude.ai/claude-code-releases/$_channel" \
                 2>/dev/null | tr -d '[:space:]' || true)
             _cur=$(cat "$_D/version" 2>/dev/null || true)
             [ -n "$_latest" ] && : > "$_stamp" 2>/dev/null || true
@@ -174,7 +175,6 @@ END_WRAPPER
 # Prints a one-line notice if a newer tag exists; never fatal.
 check_manager_update() {
     _mstamp="/usr/local/share/claude-freebsd/lastcheck"
-    mkdir -p "${_mstamp%/*}" 2>/dev/null || true
     _do=0
     if [ ! -e "$_mstamp" ]; then
         _do=1
@@ -218,6 +218,7 @@ try_fetch_to() {
 
 action=""
 channel=latest
+channel_explicit=0
 pinver=""
 force=0
 
@@ -230,7 +231,7 @@ while [ $# -gt 0 ]; do
         --write-wrapper) action=writewrapper ;;  # internal: called by --self-update
         --channel)
             [ $# -ge 2 ] || die "--channel requires an argument (latest or stable)"
-            shift; channel="$1"
+            shift; channel="$1"; channel_explicit=1
             case "$channel" in
                 latest|stable) ;;
                 *) die "--channel must be 'latest' or 'stable', got: $channel" ;;
@@ -253,6 +254,12 @@ done
 if [ -z "$action" ]; then
     usage
     exit 0
+fi
+
+# If --channel was not explicitly passed, use the stored preference (default: latest).
+CHANNEL_FILE="/usr/local/share/claude-freebsd/channel"
+if [ "$channel_explicit" -eq 0 ] && [ -f "$CHANNEL_FILE" ]; then
+    channel=$(cat "$CHANNEL_FILE")
 fi
 
 # ── resolve own path (needed for root hint, self-install, and skip logic) ──────
@@ -491,9 +498,10 @@ fi
 # ── install Claude Code binary ────────────────────────────────────────────────
 
 info "Installing Claude Code..."
-mkdir -p "$REAL_DIR"
+mkdir -p "$REAL_DIR" /usr/local/share/claude-freebsd
 install -m 755 "$binary" "$REAL_BIN"
 printf '%s\n' "$ver" > "$VER_FILE"
+printf '%s\n' "$channel" > "$CHANNEL_FILE"
 
 fi # end skip_binary
 
