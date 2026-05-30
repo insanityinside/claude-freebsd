@@ -220,11 +220,10 @@ force=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --install)       action=install ;;
-        --update)        action=update ;;
-        --uninstall)     action=uninstall ;;
-        --self-update)   action=selfupdate ;;
-        --write-wrapper) action=writewrapper ;;  # internal: used by --self-update
+        --install)      action=install ;;
+        --update)       action=update ;;
+        --uninstall)    action=uninstall ;;
+        --self-update)  action=selfupdate ;;
         --channel)
             [ $# -ge 2 ] || die "--channel requires an argument (latest or stable)"
             shift; channel="$1"
@@ -338,14 +337,6 @@ if [ "$action" = "selfupdate" ]; then
     fetch_to "$GITHUB_RAW/v${_gh_ver}/claude-freebsd.sh" "$_tmpscript"
     install -m 755 "$_tmpscript" "$SELF_PATH"
     info "Manager updated to v$_gh_ver at $SELF_PATH"
-    # Exec the newly installed manager to rewrite the wrapper with its template
-    exec "$SELF_PATH" --write-wrapper
-fi
-
-# ── write-wrapper (internal — called via exec from --self-update) ─────────────
-
-if [ "$action" = "writewrapper" ]; then
-    [ -f "$VER_FILE" ] || die "Claude Code is not installed ($VER_FILE not found)"
     write_wrapper
     info "Wrapper updated at $WRAPPER"
     exit 0
