@@ -1,5 +1,8 @@
 #!/bin/sh
 #
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026, Richard Aspden
+#
 # claude-freebsd — install and manage Claude Code on FreeBSD via Linuxulator
 #
 # The official Claude Code linux-x64 native binary runs unmodified under
