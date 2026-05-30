@@ -28,7 +28,7 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.3"
+SCRIPT_VERSION="1.0.4"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
@@ -173,7 +173,8 @@ END_WRAPPER
 # Throttled check for a newer manager release on GitHub (at most once per day).
 # Prints a one-line notice if a newer tag exists; never fatal.
 check_manager_update() {
-    _mstamp="${HOME:-/tmp}/.claude-freebsd-lastcheck"
+    _mstamp="/usr/local/share/claude-freebsd/lastcheck"
+    mkdir -p "${_mstamp%/*}" 2>/dev/null || true
     _do=0
     if [ ! -e "$_mstamp" ]; then
         _do=1
@@ -318,6 +319,11 @@ if [ "$action" = "uninstall" ]; then
     if [ -d "$REAL_DIR" ]; then
         rm -rf "$REAL_DIR"
         info "  removed: $REAL_DIR"
+    fi
+    # State directory
+    if [ -d /usr/local/share/claude-freebsd ]; then
+        rm -rf /usr/local/share/claude-freebsd
+        info "  removed: /usr/local/share/claude-freebsd"
     fi
     # Manager — safe to remove even if we are currently running from it
     if [ -e "$SELF_PATH" ]; then
