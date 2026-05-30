@@ -1,36 +1,32 @@
 #!/bin/sh
 #
-# claude-code-freebsd.sh — install / update Claude Code on FreeBSD via Linuxulator
+# claude-freebsd — install and manage Claude Code on FreeBSD via Linuxulator
 #
 # The official Claude Code linux-x64 native binary runs unmodified under
-# FreeBSD's Linux ABI (Linuxulator).  This script fetches that binary from
+# FreeBSD's Linux ABI (Linuxulator).  This tool fetches that binary from
 # Anthropic's download infrastructure (downloads.claude.ai), verifies its
-# SHA256 against the signed manifest, installs it to
-# /usr/local/libexec/claude-code/, and creates a thin wrapper at
-# /usr/local/bin/claude that disables the binary's own auto-updater and instead
-# prints a one-line nudge (at most once per day) when a newer release is out.
+# SHA256 against the signed manifest, and installs it behind a thin wrapper
+# at /usr/local/bin/claude that disables the binary's own auto-updater.
 #
-# Usage:  sudo sh claude-code-freebsd.sh [OPTIONS]
+# Usage:
+#   claude-freebsd --install [OPTIONS]   install Claude Code (and this tool)
+#   claude-freebsd --update  [OPTIONS]   update Claude Code to latest
+#   claude-freebsd --help                show this help
 #
+# Options (for --install / --update):
 #   --channel latest|stable  release channel to track (default: latest)
 #   --version X.Y.Z          install a specific version instead
 #   --force                  reinstall even if already at the target version
-#   --help                   show this help
 #
-# Requirements:
-#   FreeBSD amd64, Linuxulator loaded (linux64 kmod + linux_base-rl9), root.
-#
-# This script does NOT set up Linuxulator and does NOT remove existing installs.
-# If either is needed it will print the relevant command and exit cleanly.
-#
-# Re-run as root to update Claude Code at any time.
+# Root is required for --install and --update.
 # Suppress the per-launch "update available" nudge:  CLAUDE_FBSD_NO_NOTIFY=1
 
 set -eu
 
 # ── constants ────────────────────────────────────────────────────────────────
 
-PROG="claude-code-freebsd.sh"
+PROG="claude-freebsd"
+SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
 REAL_BIN="$REAL_DIR/claude"
 VER_FILE="$REAL_DIR/version"
@@ -47,24 +43,37 @@ die() { printf '%s: error: %s\n' "$PROG" "$*" >&2; exit 1; }
 
 usage() {
     cat <<EOF
-Usage: sudo sh $PROG [OPTIONS]
+claude-freebsd — install and manage Claude Code on FreeBSD via Linuxulator
 
+Usage:
+  $PROG --install [OPTIONS]   install Claude Code (and this tool)
+  $PROG --update  [OPTIONS]   update Claude Code to latest
+  $PROG --help                show this help
+
+Options (for --install / --update):
   --channel latest|stable  release channel to track (default: latest)
   --version X.Y.Z          install a specific version instead
   --force                  reinstall even if already at the target version
-  --help                   show this help
 
-Requirements: FreeBSD amd64, Linuxulator (linux64 kmod + linux_base-rl9), root.
+Requirements:
+  FreeBSD amd64, Linuxulator active (linux64 kmod + linux_base-rl9), root.
 
-This script does NOT set up Linuxulator and does NOT remove existing installs.
-If either is needed it prints the relevant command and exits cleanly.
+The following /etc/fstab entries are required for Claude Code to run correctly.
+The fdescfs entry MUST include linrdlnk or claude will hang on startup.
 
-Re-run as root to update Claude Code at any time.
+  devfs     /compat/linux/dev      devfs     rw
+  tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777
+  fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk
+  linprocfs /compat/linux/proc     linprocfs rw
+  linsysfs  /compat/linux/sys      linsysfs  rw
+  /tmp      /compat/linux/tmp      nullfs    rw
+  /home     /compat/linux/home     nullfs    rw
+
 Suppress the per-launch "update available" nudge:  CLAUDE_FBSD_NO_NOTIFY=1
 EOF
 }
 
-# Fetch URL to dest file; dies with a message on failure.
+# Fetch URL to dest file; dies on failure.
 fetch_to() {
     _url=$1; _dst=$2
     if fetch -qT30 -o "$_dst" "$_url" 2>/dev/null; then return 0; fi
@@ -86,12 +95,15 @@ try_fetch_to() {
 
 # ── argument parsing ──────────────────────────────────────────────────────────
 
+action=""
 channel=latest
 pinver=""
 force=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --install)  action=install ;;
+        --update)   action=update ;;
         --channel)
             [ $# -ge 2 ] || die "--channel requires an argument (latest or stable)"
             shift; channel="$1"
@@ -113,16 +125,46 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-# ── preconditions ─────────────────────────────────────────────────────────────
+# Default: show help
+if [ -z "$action" ]; then
+    usage
+    exit 0
+fi
+
+# ── resolve own path (needed for root hint, self-install, and skip logic) ──────
+
+self=$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")
+# Running from outside SELF_PATH means we should always update the manager and
+# wrapper, even if the Claude Code binary is already current.
+need_selfinstall=0
+[ "$self" != "$SELF_PATH" ] && need_selfinstall=1
+
+# ── root check ────────────────────────────────────────────────────────────────
+
+if [ "$(id -u)" -ne 0 ]; then
+    printf '%s: --%s requires root. Re-run with sudo or doas:\n\n' "$PROG" "$action" >&2
+    # Print the exact command to repeat, including any options passed
+    _cmd="sudo $self --$action"
+    [ "$channel" != "latest" ] && _cmd="$_cmd --channel $channel"
+    [ -n "$pinver" ]           && _cmd="$_cmd --version $pinver"
+    [ "$force" -eq 1 ]         && _cmd="$_cmd --force"
+    printf '    %s\n\n' "$_cmd" >&2
+    exit 1
+fi
+
+# ── OS / arch checks ──────────────────────────────────────────────────────────
 
 [ "$(uname -s)" = FreeBSD ] \
     || die "FreeBSD only (this host reports: $(uname -s))"
 [ "$(uname -m)" = amd64 ] \
     || die "amd64 only — the linux-x64 binary requires Linuxulator on amd64 (got $(uname -m))"
-[ "$(id -u)" -eq 0 ] \
-    || die "must run as root to write to /usr/local — re-run with sudo or doas"
 
-if ! kldstat -q -n linux64.ko 2>/dev/null; then
+# ── Linuxulator check ─────────────────────────────────────────────────────────
+
+# kldstat -n checks by filename; also catches the case where the kernel was
+# compiled with Linuxulator built in (sysctl exists even without the kmod).
+if ! kldstat -q -n linux64.ko 2>/dev/null && \
+   ! sysctl -n compat.linux.osrelease >/dev/null 2>&1; then
     printf '%s: Linuxulator does not appear to be active.\n' "$PROG" >&2
     printf '\nOne-time setup (as root):\n' >&2
     printf '    pkg install -y linux_base-rl9\n' >&2
@@ -131,7 +173,18 @@ if ! kldstat -q -n linux64.ko 2>/dev/null; then
     exit 1
 fi
 
-# Conflict check: refuse to clobber a foreign /usr/local/bin/claude.
+# Claude Code is a dynamically-linked ELF that needs glibc (libc.so.6,
+# libpthread, libdl, libm, librt).  Check for the key library rather than
+# the package name so this works however glibc was provisioned.
+if [ ! -f /compat/linux/lib64/libc.so.6 ]; then
+    printf '%s: Linux glibc runtime not found at /compat/linux/lib64/libc.so.6.\n' "$PROG" >&2
+    printf '    Install it:  pkg install -y linux_base-rl9\n\n' >&2
+    exit 1
+fi
+
+# ── conflict check ────────────────────────────────────────────────────────────
+
+# Refuse to clobber a foreign /usr/local/bin/claude.
 # Skip if this is already our own install (identified by the version sentinel).
 if [ -e "$WRAPPER" ] || [ -L "$WRAPPER" ]; then
     if [ -f "$VER_FILE" ]; then
@@ -178,23 +231,30 @@ else
     info "Latest $channel: $ver"
 fi
 
-# ── skip if already current ───────────────────────────────────────────────────
+# ── skip binary download if already current ───────────────────────────────────
 
+skip_binary=0
 if [ -f "$VER_FILE" ] && [ "$force" -eq 0 ]; then
     cur=$(cat "$VER_FILE")
     if [ "$cur" = "$ver" ]; then
-        info "Already at $ver — nothing to do (use --force to reinstall)."
-        exit 0
+        if [ "$need_selfinstall" -eq 0 ]; then
+            info "Claude Code is already at $ver — nothing to do (use --force to reinstall)."
+            exit 0
+        fi
+        info "Claude Code is already at $ver — updating manager and wrapper only."
+        skip_binary=1
+    else
+        info "Upgrading: $cur -> $ver"
     fi
-    info "Upgrading: $cur -> $ver"
 fi
 
 # ── download + verify ─────────────────────────────────────────────────────────
 
+if [ "$skip_binary" -eq 0 ]; then
+
 workdir=$(mktemp -d /tmp/cc-install.XXXXXX)
 trap 'rm -rf "$workdir"' EXIT
 
-# Fetch manifest and extract the linux-x64 checksum.
 info "Fetching manifest for v${ver}..."
 mf="$workdir/manifest.json"
 if try_fetch_to "$DOWNLOAD_BASE/$ver/manifest.json" "$mf"; then
@@ -213,7 +273,6 @@ info "Downloading $PLATFORM binary for v${ver}..."
 binary="$workdir/claude"
 fetch_to "$DOWNLOAD_BASE/$ver/$PLATFORM/claude" "$binary"
 
-# Verify SHA256 if we got a checksum from the manifest.
 if [ -n "$expected" ]; then
     info "Verifying SHA256..."
     actual=$(sha256 -q "$binary")
@@ -225,26 +284,69 @@ if [ -n "$expected" ]; then
     info "SHA256 OK"
 fi
 
-# ── install ───────────────────────────────────────────────────────────────────
+# ── install Claude Code binary ────────────────────────────────────────────────
 
-info "Installing..."
+info "Installing Claude Code..."
 mkdir -p "$REAL_DIR"
 install -m 755 "$binary" "$REAL_BIN"
 printf '%s\n' "$ver" > "$VER_FILE"
 
-# Write the wrapper (overwrites on update; no variables expanded inside heredoc)
+fi # end skip_binary
+
+# ── write wrapper (always — may contain updated template) ─────────────────────
+
+info "Writing wrapper..."
 cat > "$WRAPPER" << 'END_WRAPPER'
 #!/bin/sh
-# Managed by claude-code-freebsd.sh — do not hand-edit.
+# Managed by claude-freebsd — do not hand-edit.
 #
 # The Claude Code binary's own self-updater is disabled.
-# To update:  sudo claude-code-freebsd.sh
+# To update:  sudo claude-freebsd --update
 # To silence the "update available" notice:  export CLAUDE_FBSD_NO_NOTIFY=1
 
 export DISABLE_AUTOUPDATER=1
 export DISABLE_UPDATES=1
 
 _D=/usr/local/libexec/claude-code
+
+# Check all required Linuxulator mounts — claude hangs or misbehaves without them.
+_mounts=$(mount)
+_mount_warn=0
+for _mp in \
+    /compat/linux/dev     \
+    /compat/linux/dev/shm \
+    /compat/linux/dev/fd  \
+    /compat/linux/proc    \
+    /compat/linux/sys     \
+    /compat/linux/tmp     \
+    /compat/linux/home
+do
+    if ! printf '%s\n' "$_mounts" | grep -q " on ${_mp} "; then
+        printf 'claude: warning: %s is not mounted\n' "$_mp" >&2
+        _mount_warn=1
+    fi
+done
+# fdescfs MUST have linrdlnk — without it claude hangs indefinitely on startup.
+# mount(8) does not report fdescfs options in its output, so check /etc/fstab.
+if printf '%s\n' "$_mounts" | grep -q " on /compat/linux/dev/fd "; then
+    if ! grep -vE '^[[:space:]]*#' /etc/fstab 2>/dev/null | \
+       grep -qE '[[:space:]]/compat/linux/dev/fd[[:space:]].*linrdlnk'; then
+        printf 'claude: warning: /compat/linux/dev/fd is mounted without linrdlnk — claude will hang on startup\n' >&2
+        printf 'claude:   /etc/fstab should read: fdescfs /compat/linux/dev/fd fdescfs rw,linrdlnk 0 0\n' >&2
+        printf 'claude:   then remount: umount /compat/linux/dev/fd && mount /compat/linux/dev/fd\n' >&2
+        _mount_warn=1
+    fi
+fi
+if [ "$_mount_warn" -eq 1 ]; then
+    printf 'claude: add missing/corrected entries to /etc/fstab, then: mount -a\n' >&2
+    printf 'claude:   devfs     /compat/linux/dev      devfs     rw\n' >&2
+    printf 'claude:   tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777\n' >&2
+    printf 'claude:   fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk\n' >&2
+    printf 'claude:   linprocfs /compat/linux/proc     linprocfs rw\n' >&2
+    printf 'claude:   linsysfs  /compat/linux/sys      linsysfs  rw\n' >&2
+    printf 'claude:   /tmp      /compat/linux/tmp      nullfs    rw\n' >&2
+    printf 'claude:   /home     /compat/linux/home     nullfs    rw\n' >&2
+fi
 
 # Throttled update check: async, TTY stderr only, at most once per day per user.
 # Skip for --version/--help where claude exits before the fetch completes.
@@ -267,34 +369,41 @@ if [ "$_do_nudge" -eq 1 ] && [ -z "${CLAUDE_FBSD_NO_NOTIFY:-}" ] && [ -t 2 ]; th
             _cur=$(cat "$_D/version" 2>/dev/null || true)
             [ -n "$_latest" ] && : > "$_stamp" 2>/dev/null || true
             if [ -n "$_latest" ] && [ -n "$_cur" ] && [ "$_latest" != "$_cur" ]; then
-                printf 'claude-code: %s available (you have %s) — update: sudo claude-code-freebsd.sh\n' \
+                printf 'claude-code: %s available (you have %s) — update: sudo claude-freebsd --update\n' \
                     "$_latest" "$_cur" >&2
             fi
         ) &
     fi
 fi
 
-# Warn if required nullfs mounts are absent — claude hangs without them.
-for _mp in /compat/linux/tmp /compat/linux/home; do
-    if ! mount | grep -q " on ${_mp} "; then
-        printf 'claude-code: warning: %s is not mounted (claude may hang)\n' "$_mp" >&2
-        printf 'claude-code:   add to /etc/fstab: %s %s nullfs rw 0 0\n' \
-            "${_mp#/compat/linux}" "$_mp" >&2
-        printf 'claude-code:   then run: mount %s\n' "$_mp" >&2
-    fi
-done
-
 exec "$_D/claude" "$@"
 END_WRAPPER
 chmod 755 "$WRAPPER"
 
+# ── self-install ──────────────────────────────────────────────────────────────
+
+if [ "$self" != "$SELF_PATH" ]; then
+    info "Installing manager to $SELF_PATH..."
+    install -m 755 "$self" "$SELF_PATH"
+fi
+
 # ── done ─────────────────────────────────────────────────────────────────────
 
 printf '\n'
-info "Claude Code $ver installed."
+if [ "$skip_binary" -eq 0 ]; then
+    info "Claude Code $ver installed."
+else
+    info "Manager and wrapper updated (Claude Code remains at $ver)."
+fi
 info "  Binary  : $REAL_BIN"
 info "  Wrapper : $WRAPPER  (self-update disabled)"
+info "  Manager : $SELF_PATH"
 printf '\n'
-info "Verify:  claude --version"
-info "Update:  sudo $PROG"
-info "Nudge:   export CLAUDE_FBSD_NO_NOTIFY=1  (to silence update notices)"
+if [ "$need_selfinstall" -eq 1 ]; then
+    info "Going forward, manage Claude Code with:"
+    info "  sudo claude-freebsd --update          # update to latest"
+    info "  sudo claude-freebsd --update --channel stable"
+    info "  sudo claude-freebsd --update --version X.Y.Z"
+else
+    info "To update:  sudo claude-freebsd --update"
+fi
