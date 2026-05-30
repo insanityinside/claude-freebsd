@@ -28,7 +28,7 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
@@ -85,7 +85,7 @@ EOF
 write_wrapper() {
     cat > "$WRAPPER" << 'END_WRAPPER'
 #!/bin/sh
-# Managed by claude-freebsd — do not hand-edit.
+# Managed by claude-freebsd vVER_PLACEHOLDER — do not hand-edit.
 #
 # The Claude Code binary's own self-updater is disabled.
 # To update:  sudo claude-freebsd --update
@@ -165,7 +165,9 @@ fi
 
 exec "$_D/claude" "$@"
 END_WRAPPER
+    sed -i '' "s/vVER_PLACEHOLDER/v${SCRIPT_VERSION}/" "$WRAPPER"
     chmod 755 "$WRAPPER"
+    info "  Wrapper : $WRAPPER (claude-freebsd v${SCRIPT_VERSION})"
 }
 
 # Throttled check for a newer manager release on GitHub (at most once per day).
@@ -348,10 +350,9 @@ if [ "$action" = "selfupdate" ]; then
     info "Manager updated to v$_gh_ver at $SELF_PATH"
     # Run the newly installed manager to write its own wrapper template.
     # Fall back to the current template if the new release predates --write-wrapper.
-    if ! "$SELF_PATH" --write-wrapper 2>/dev/null; then
+    if ! "$SELF_PATH" --write-wrapper; then
         write_wrapper
     fi
-    info "Wrapper updated at $WRAPPER"
     exit 0
 fi
 
