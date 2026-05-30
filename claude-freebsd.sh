@@ -81,6 +81,93 @@ Suppress the per-launch "update available" nudge:  CLAUDE_FBSD_NO_NOTIFY=1
 EOF
 }
 
+# Write the /usr/local/bin/claude wrapper from the current script's template.
+write_wrapper() {
+    cat > "$WRAPPER" << 'END_WRAPPER'
+#!/bin/sh
+# Managed by claude-freebsd — do not hand-edit.
+#
+# The Claude Code binary's own self-updater is disabled.
+# To update:  sudo claude-freebsd --update
+# To silence the "update available" notice:  export CLAUDE_FBSD_NO_NOTIFY=1
+
+export DISABLE_AUTOUPDATER=1
+export DISABLE_UPDATES=1
+
+_D=/usr/local/libexec/claude-code
+
+# Check all required Linuxulator mounts — claude hangs or misbehaves without them.
+_mounts=$(mount)
+_mount_warn=0
+for _mp in \
+    /compat/linux/dev     \
+    /compat/linux/dev/shm \
+    /compat/linux/dev/fd  \
+    /compat/linux/proc    \
+    /compat/linux/sys     \
+    /compat/linux/tmp     \
+    /compat/linux/home
+do
+    if ! printf '%s\n' "$_mounts" | grep -q " on ${_mp} "; then
+        printf 'claude: warning: %s is not mounted\n' "$_mp" >&2
+        _mount_warn=1
+    fi
+done
+# fdescfs MUST have linrdlnk — without it claude hangs indefinitely on startup.
+# mount(8) does not report fdescfs options in its output, so check /etc/fstab.
+if printf '%s\n' "$_mounts" | grep -q " on /compat/linux/dev/fd "; then
+    if ! grep -vE '^[[:space:]]*#' /etc/fstab 2>/dev/null | \
+       grep -qE '[[:space:]]/compat/linux/dev/fd[[:space:]].*linrdlnk'; then
+        printf 'claude: warning: /compat/linux/dev/fd is mounted without linrdlnk — claude will hang on startup\n' >&2
+        printf 'claude:   /etc/fstab should read: fdescfs /compat/linux/dev/fd fdescfs rw,linrdlnk 0 0\n' >&2
+        printf 'claude:   then remount: umount /compat/linux/dev/fd && mount /compat/linux/dev/fd\n' >&2
+        _mount_warn=1
+    fi
+fi
+if [ "$_mount_warn" -eq 1 ]; then
+    printf 'claude: add missing/corrected entries to /etc/fstab, then: mount -a\n' >&2
+    printf 'claude:   devfs     /compat/linux/dev      devfs     rw\n' >&2
+    printf 'claude:   tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777\n' >&2
+    printf 'claude:   fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk\n' >&2
+    printf 'claude:   linprocfs /compat/linux/proc     linprocfs rw\n' >&2
+    printf 'claude:   linsysfs  /compat/linux/sys      linsysfs  rw\n' >&2
+    printf 'claude:   /tmp      /compat/linux/tmp      nullfs    rw\n' >&2
+    printf 'claude:   /home     /compat/linux/home     nullfs    rw\n' >&2
+fi
+
+# Throttled update check: async, TTY stderr only, at most once per day per user.
+# Skip for --version/--help where claude exits before the fetch completes.
+case "${1:-}" in --version|--help|-h) _do_nudge=0 ;; *) _do_nudge=1 ;; esac
+if [ "$_do_nudge" -eq 1 ] && [ -z "${CLAUDE_FBSD_NO_NOTIFY:-}" ] && [ -t 2 ]; then
+    _stamp="${HOME:-/tmp}/.claude-code-lastcheck"
+    _do=0
+    if [ ! -e "$_stamp" ]; then
+        _do=1
+    else
+        _now=$(date +%s 2>/dev/null || echo 0)
+        _then=$(stat -f %m "$_stamp" 2>/dev/null || echo 0)
+        [ "$(( _now - _then ))" -gt 86400 ] && _do=1
+    fi
+    if [ "$_do" -eq 1 ]; then
+        (
+            _latest=$(fetch -qT2 -o - \
+                https://downloads.claude.ai/claude-code-releases/latest \
+                2>/dev/null | tr -d '[:space:]' || true)
+            _cur=$(cat "$_D/version" 2>/dev/null || true)
+            [ -n "$_latest" ] && : > "$_stamp" 2>/dev/null || true
+            if [ -n "$_latest" ] && [ -n "$_cur" ] && [ "$_latest" != "$_cur" ]; then
+                printf 'claude-code: %s available (you have %s) — update: sudo claude-freebsd --update\n' \
+                    "$_latest" "$_cur" >&2
+            fi
+        ) &
+    fi
+fi
+
+exec "$_D/claude" "$@"
+END_WRAPPER
+    chmod 755 "$WRAPPER"
+}
+
 # Throttled check for a newer manager release on GitHub (at most once per day).
 # Prints a one-line notice if a newer tag exists; never fatal.
 check_manager_update() {
@@ -133,10 +220,11 @@ force=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --install)      action=install ;;
-        --update)       action=update ;;
-        --uninstall)    action=uninstall ;;
-        --self-update)  action=selfupdate ;;
+        --install)       action=install ;;
+        --update)        action=update ;;
+        --uninstall)     action=uninstall ;;
+        --self-update)   action=selfupdate ;;
+        --write-wrapper) action=writewrapper ;;  # internal: used by --self-update
         --channel)
             [ $# -ge 2 ] || die "--channel requires an argument (latest or stable)"
             shift; channel="$1"
@@ -250,6 +338,16 @@ if [ "$action" = "selfupdate" ]; then
     fetch_to "$GITHUB_RAW/v${_gh_ver}/claude-freebsd.sh" "$_tmpscript"
     install -m 755 "$_tmpscript" "$SELF_PATH"
     info "Manager updated to v$_gh_ver at $SELF_PATH"
+    # Exec the newly installed manager to rewrite the wrapper with its template
+    exec "$SELF_PATH" --write-wrapper
+fi
+
+# ── write-wrapper (internal — called via exec from --self-update) ─────────────
+
+if [ "$action" = "writewrapper" ]; then
+    [ -f "$VER_FILE" ] || die "Claude Code is not installed ($VER_FILE not found)"
+    write_wrapper
+    info "Wrapper updated at $WRAPPER"
     exit 0
 fi
 
@@ -333,6 +431,7 @@ if [ -f "$VER_FILE" ] && [ "$force" -eq 0 ]; then
     if [ "$cur" = "$ver" ]; then
         if [ "$need_selfinstall" -eq 0 ]; then
             info "Claude Code is already at $ver — nothing to do (use --force to reinstall)."
+            check_manager_update
             exit 0
         fi
         info "Claude Code is already at $ver — updating manager and wrapper only."
@@ -389,90 +488,7 @@ fi # end skip_binary
 
 # ── write wrapper (always — may contain updated template) ─────────────────────
 
-info "Writing wrapper..."
-cat > "$WRAPPER" << 'END_WRAPPER'
-#!/bin/sh
-# Managed by claude-freebsd — do not hand-edit.
-#
-# The Claude Code binary's own self-updater is disabled.
-# To update:  sudo claude-freebsd --update
-# To silence the "update available" notice:  export CLAUDE_FBSD_NO_NOTIFY=1
-
-export DISABLE_AUTOUPDATER=1
-export DISABLE_UPDATES=1
-
-_D=/usr/local/libexec/claude-code
-
-# Check all required Linuxulator mounts — claude hangs or misbehaves without them.
-_mounts=$(mount)
-_mount_warn=0
-for _mp in \
-    /compat/linux/dev     \
-    /compat/linux/dev/shm \
-    /compat/linux/dev/fd  \
-    /compat/linux/proc    \
-    /compat/linux/sys     \
-    /compat/linux/tmp     \
-    /compat/linux/home
-do
-    if ! printf '%s\n' "$_mounts" | grep -q " on ${_mp} "; then
-        printf 'claude: warning: %s is not mounted\n' "$_mp" >&2
-        _mount_warn=1
-    fi
-done
-# fdescfs MUST have linrdlnk — without it claude hangs indefinitely on startup.
-# mount(8) does not report fdescfs options in its output, so check /etc/fstab.
-if printf '%s\n' "$_mounts" | grep -q " on /compat/linux/dev/fd "; then
-    if ! grep -vE '^[[:space:]]*#' /etc/fstab 2>/dev/null | \
-       grep -qE '[[:space:]]/compat/linux/dev/fd[[:space:]].*linrdlnk'; then
-        printf 'claude: warning: /compat/linux/dev/fd is mounted without linrdlnk — claude will hang on startup\n' >&2
-        printf 'claude:   /etc/fstab should read: fdescfs /compat/linux/dev/fd fdescfs rw,linrdlnk 0 0\n' >&2
-        printf 'claude:   then remount: umount /compat/linux/dev/fd && mount /compat/linux/dev/fd\n' >&2
-        _mount_warn=1
-    fi
-fi
-if [ "$_mount_warn" -eq 1 ]; then
-    printf 'claude: add missing/corrected entries to /etc/fstab, then: mount -a\n' >&2
-    printf 'claude:   devfs     /compat/linux/dev      devfs     rw\n' >&2
-    printf 'claude:   tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777\n' >&2
-    printf 'claude:   fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk\n' >&2
-    printf 'claude:   linprocfs /compat/linux/proc     linprocfs rw\n' >&2
-    printf 'claude:   linsysfs  /compat/linux/sys      linsysfs  rw\n' >&2
-    printf 'claude:   /tmp      /compat/linux/tmp      nullfs    rw\n' >&2
-    printf 'claude:   /home     /compat/linux/home     nullfs    rw\n' >&2
-fi
-
-# Throttled update check: async, TTY stderr only, at most once per day per user.
-# Skip for --version/--help where claude exits before the fetch completes.
-case "${1:-}" in --version|--help|-h) _do_nudge=0 ;; *) _do_nudge=1 ;; esac
-if [ "$_do_nudge" -eq 1 ] && [ -z "${CLAUDE_FBSD_NO_NOTIFY:-}" ] && [ -t 2 ]; then
-    _stamp="${HOME:-/tmp}/.claude-code-lastcheck"
-    _do=0
-    if [ ! -e "$_stamp" ]; then
-        _do=1
-    else
-        _now=$(date +%s 2>/dev/null || echo 0)
-        _then=$(stat -f %m "$_stamp" 2>/dev/null || echo 0)
-        [ "$(( _now - _then ))" -gt 86400 ] && _do=1
-    fi
-    if [ "$_do" -eq 1 ]; then
-        (
-            _latest=$(fetch -qT2 -o - \
-                https://downloads.claude.ai/claude-code-releases/latest \
-                2>/dev/null | tr -d '[:space:]' || true)
-            _cur=$(cat "$_D/version" 2>/dev/null || true)
-            [ -n "$_latest" ] && : > "$_stamp" 2>/dev/null || true
-            if [ -n "$_latest" ] && [ -n "$_cur" ] && [ "$_latest" != "$_cur" ]; then
-                printf 'claude-code: %s available (you have %s) — update: sudo claude-freebsd --update\n' \
-                    "$_latest" "$_cur" >&2
-            fi
-        ) &
-    fi
-fi
-
-exec "$_D/claude" "$@"
-END_WRAPPER
-chmod 755 "$WRAPPER"
+write_wrapper
 
 # ── self-install ──────────────────────────────────────────────────────────────
 
