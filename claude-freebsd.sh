@@ -28,7 +28,7 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.4"
+SCRIPT_VERSION="1.0.5"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
@@ -186,7 +186,7 @@ check_manager_update() {
     [ "$_do" -eq 0 ] && return 0
     _gh_ver=$(fetch -qT3 -o - "$GITHUB_API" 2>/dev/null | \
         sed -n 's/.*"tag_name": *"v*\([^"]*\)".*/\1/p' | head -1 || true)
-    : > "$_mstamp" 2>/dev/null || true
+    date > "$_mstamp" 2>/dev/null || true
     [ -z "$_gh_ver" ] && return 0
     [ "$_gh_ver" = "$SCRIPT_VERSION" ] && return 0
     printf '\n'
