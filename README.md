@@ -186,3 +186,7 @@ on `PATH` directly.
 
 - [Claude Code issue #61313](https://github.com/anthropics/claude-code/issues/61313) — tracking native FreeBSD binary support
 - [Claude Code issue #30640](https://github.com/anthropics/claude-code/issues/30640) — original FreeBSD packaging request
+
+## License
+
+[BSD 2-Clause](LICENSE) — Copyright (c) 2026, Richard Aspden
