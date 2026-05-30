@@ -162,8 +162,7 @@ sudo claude-freebsd --uninstall
 ```
 
 This removes `/usr/local/bin/claude` (the wrapper), `/usr/local/libexec/claude-code/`
-(the binary and version files), `/usr/local/share/claude-freebsd/` (last tool version
-check timestamp from GitHub) and `/usr/local/bin/claude-freebsd` (this tool).
+(the binary and version files), `/usr/local/share/claude-freebsd/` (internal status/config files) and `/usr/local/bin/claude-freebsd` (this tool).
 It will only remove files it installed itself — if anything at those paths was
 put there by another means it will be left untouched. User config (`~/.claude/`)
 is never removed.
