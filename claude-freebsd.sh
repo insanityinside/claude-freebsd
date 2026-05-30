@@ -46,9 +46,10 @@ usage() {
 claude-freebsd — install and manage Claude Code on FreeBSD via Linuxulator
 
 Usage:
-  $PROG --install [OPTIONS]   install Claude Code (and this tool)
-  $PROG --update  [OPTIONS]   update Claude Code to latest
-  $PROG --help                show this help
+  $PROG --install   [OPTIONS]  install Claude Code (and this tool)
+  $PROG --update    [OPTIONS]  update Claude Code to latest
+  $PROG --uninstall            remove Claude Code, the wrapper, and this tool
+  $PROG --help                 show this help
 
 Options (for --install / --update):
   --channel latest|stable  release channel to track (default: latest)
@@ -102,8 +103,9 @@ force=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --install)  action=install ;;
-        --update)   action=update ;;
+        --install)   action=install ;;
+        --update)    action=update ;;
+        --uninstall) action=uninstall ;;
         --channel)
             [ $# -ge 2 ] || die "--channel requires an argument (latest or stable)"
             shift; channel="$1"
@@ -158,6 +160,42 @@ fi
     || die "FreeBSD only (this host reports: $(uname -s))"
 [ "$(uname -m)" = amd64 ] \
     || die "amd64 only — the linux-x64 binary requires Linuxulator on amd64 (got $(uname -m))"
+
+# ── uninstall ─────────────────────────────────────────────────────────────────
+
+if [ "$action" = "uninstall" ]; then
+    # Refuse to remove anything unless VER_FILE is present — that file is written
+    # exclusively by this tool, so its existence confirms the install is ours.
+    if [ ! -f "$VER_FILE" ]; then
+        info "Nothing to uninstall — $VER_FILE not found."
+        info "If Claude Code was installed by another method, remove it manually."
+        exit 0
+    fi
+    info "Removing Claude Code (Linuxulator install)..."
+    # Wrapper — only remove if it contains our marker comment, which is written
+    # by every version of this tool and won't appear in a foreign install.
+    if [ -e "$WRAPPER" ] || [ -L "$WRAPPER" ]; then
+        if grep -q "# Managed by claude-freebsd" "$WRAPPER" 2>/dev/null; then
+            rm -f "$WRAPPER"
+            info "  removed: $WRAPPER"
+        else
+            info "  skipped: $WRAPPER (not managed by $PROG — leaving untouched)"
+        fi
+    fi
+    # Binary + version sentinel + directory
+    if [ -d "$REAL_DIR" ]; then
+        rm -rf "$REAL_DIR"
+        info "  removed: $REAL_DIR"
+    fi
+    # Manager — safe to remove even if we are currently running from it
+    if [ -e "$SELF_PATH" ]; then
+        rm -f "$SELF_PATH"
+        info "  removed: $SELF_PATH"
+    fi
+    printf '\n'
+    info "Done. User config (~/.claude/) was not touched."
+    exit 0
+fi
 
 # ── Linuxulator check ─────────────────────────────────────────────────────────
 

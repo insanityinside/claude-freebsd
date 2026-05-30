@@ -2,6 +2,10 @@
 
 Install and manage [Claude Code](https://claude.ai/code) on FreeBSD via the Linux ABI (Linuxulator).
 
+> **Note:** This tool is a stopgap until Anthropic publishes a native FreeBSD
+> binary. Progress is tracked in
+> [issue #61313](https://github.com/anthropics/claude-code/issues/61313).
+
 ## Background
 
 Anthropic ships Claude Code as a native binary built with `bun build --compile`.
@@ -76,9 +80,10 @@ This will:
 ## Usage
 
 ```
-claude-freebsd --install [OPTIONS]   install Claude Code (and this tool)
-claude-freebsd --update  [OPTIONS]   update Claude Code to latest
-claude-freebsd --help                show this help
+claude-freebsd --install   [OPTIONS]  install Claude Code (and this tool)
+claude-freebsd --update    [OPTIONS]  update Claude Code to latest
+claude-freebsd --uninstall            remove Claude Code, the wrapper, and this tool
+claude-freebsd --help                 show this help
 
 Options (for --install / --update):
   --channel latest|stable  release channel to track (default: latest)
@@ -123,6 +128,18 @@ sudo claude-freebsd --update --channel stable
 ```sh
 sudo claude-freebsd --update --version 2.1.100
 ```
+
+### Uninstalling
+
+```sh
+sudo claude-freebsd --uninstall
+```
+
+This removes `/usr/local/bin/claude` (the wrapper), `/usr/local/libexec/claude-code/`
+(the binary and version files), and `/usr/local/bin/claude-freebsd` (this tool).
+It will only remove files it installed itself — if anything at those paths was
+put there by another means it will be left untouched. User config (`~/.claude/`)
+is never removed.
 
 ## How it works
 
