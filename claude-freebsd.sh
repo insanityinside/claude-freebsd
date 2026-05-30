@@ -28,7 +28,7 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.0.2"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
@@ -220,10 +220,11 @@ force=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --install)      action=install ;;
-        --update)       action=update ;;
-        --uninstall)    action=uninstall ;;
-        --self-update)  action=selfupdate ;;
+        --install)       action=install ;;
+        --update)        action=update ;;
+        --uninstall)     action=uninstall ;;
+        --self-update)   action=selfupdate ;;
+        --write-wrapper) action=writewrapper ;;  # internal: called by --self-update
         --channel)
             [ $# -ge 2 ] || die "--channel requires an argument (latest or stable)"
             shift; channel="$1"
@@ -273,6 +274,14 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
     printf '    %s\n\n' "$_cmd" >&2
     exit 1
+fi
+
+# ── write-wrapper (internal — invoked as subprocess by --self-update) ─────────
+
+if [ "$action" = "writewrapper" ]; then
+    [ -f "$VER_FILE" ] || die "Claude Code does not appear to be installed"
+    write_wrapper
+    exit 0
 fi
 
 # ── OS / arch checks ──────────────────────────────────────────────────────────
@@ -337,7 +346,11 @@ if [ "$action" = "selfupdate" ]; then
     fetch_to "$GITHUB_RAW/v${_gh_ver}/claude-freebsd.sh" "$_tmpscript"
     install -m 755 "$_tmpscript" "$SELF_PATH"
     info "Manager updated to v$_gh_ver at $SELF_PATH"
-    write_wrapper
+    # Run the newly installed manager to write its own wrapper template.
+    # Fall back to the current template if the new release predates --write-wrapper.
+    if ! "$SELF_PATH" --write-wrapper 2>/dev/null; then
+        write_wrapper
+    fi
     info "Wrapper updated at $WRAPPER"
     exit 0
 fi
