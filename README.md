@@ -19,6 +19,14 @@ the fetch, verification, and installation of that binary, and keeps it updated
 without relying on the binary's own auto-updater (which cannot write to
 `/usr/local/bin` as a normal user anyway).
 
+## Tested on
+
+- FreeBSD 15.0-RELEASE-p5 amd64
+
+If you're running an older version of FreeBSD and run into problems, please
+[open an issue](https://github.com/insanityinside/claude-freebsd/issues) with
+your FreeBSD version and the output of the failing command.
+
 ## Requirements
 
 - FreeBSD **amd64** (the linux-x64 binary requires Linuxulator on amd64)
