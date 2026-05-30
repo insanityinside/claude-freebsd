@@ -31,7 +31,7 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.6"
+SCRIPT_VERSION="1.0.7"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
@@ -93,6 +93,7 @@ write_wrapper() {
 # The Claude Code binary's own self-updater is disabled.
 # To update:  sudo claude-freebsd --update
 # To silence the "update available" notice:  export CLAUDE_FBSD_NO_NOTIFY=1
+# To silence mount warnings:                 export CLAUDE_FBSD_NO_MOUNT_WARN=1
 
 export DISABLE_AUTOUPDATER=1
 export DISABLE_UPDATES=1
@@ -100,42 +101,85 @@ export DISABLE_UPDATES=1
 _D=/usr/local/libexec/claude-code
 
 # Check all required Linuxulator mounts — claude hangs or misbehaves without them.
-_mounts=$(mount)
-_mount_warn=0
-for _mp in \
-    /compat/linux/dev     \
-    /compat/linux/dev/shm \
-    /compat/linux/dev/fd  \
-    /compat/linux/proc    \
-    /compat/linux/sys     \
-    /compat/linux/tmp     \
-    /compat/linux/home
-do
-    if ! printf '%s\n' "$_mounts" | grep -q " on ${_mp} "; then
-        printf 'claude: warning: %s is not mounted\n' "$_mp" >&2
-        _mount_warn=1
+# Suppress all mount warnings: export CLAUDE_FBSD_NO_MOUNT_WARN=1
+if [ -z "${CLAUDE_FBSD_NO_MOUNT_WARN:-}" ]; then
+    _mount_warn=0
+    if sysctl -n security.jail.jailed 2>/dev/null | grep -q '^1'; then
+        # Inside a jail: mount(8) only reports the jail's own root dataset, not the
+        # Linuxulator mounts configured by the host.  Check filesystem accessibility instead.
+        for _check in \
+            "/compat/linux/dev:/compat/linux/dev/null" \
+            "/compat/linux/dev/shm:/compat/linux/dev/shm" \
+            "/compat/linux/dev/fd:/compat/linux/dev/fd" \
+            "/compat/linux/proc:/compat/linux/proc/version" \
+            "/compat/linux/sys:/compat/linux/sys/kernel" \
+            "/compat/linux/tmp:/compat/linux/tmp" \
+            "/compat/linux/home:/compat/linux/home"
+        do
+            _mp="${_check%%:*}"
+            _indicator="${_check#*:}"
+            if [ ! -e "$_indicator" ]; then
+                printf 'claude: warning: %s is not mounted\n' "$_mp" >&2
+                _mount_warn=1
+            fi
+        done
+        # linrdlnk makes fdescfs entries appear as symlinks; without it claude hangs.
+        # The option is FreeBSD-specific and absent from /proc/mounts, so test behaviorally
+        # via the fdescfs mount itself (/dev/fd), not linprocfs (/proc/self/fd) — the latter
+        # shows character special devices regardless of linrdlnk.  fd/2 (stderr) is used
+        # as the probe since the wrapper already writes to it and it is reliably open.
+        if [ -d /compat/linux/dev/fd ]; then
+            if ! [ -L /compat/linux/dev/fd/2 ]; then
+                printf 'claude: warning: fdescfs may not be mounted with linrdlnk — claude may hang\n' >&2
+                printf 'claude:   Ensure your jail configuration mounts fdescfs with the linrdlnk option.\n' >&2
+                _mount_warn=1
+            fi
+        fi
+        if [ "$_mount_warn" -eq 1 ]; then
+            printf 'claude: Configure these mounts via your jail manager (Bastille, iocage, etc.).\n' >&2
+            printf 'claude: See: https://github.com/insanityinside/claude-freebsd\n' >&2
+            printf 'claude: Suppress: export CLAUDE_FBSD_NO_MOUNT_WARN=1\n' >&2
+        fi
+    else
+        # Not in a jail — use mount(8) output.
+        _mounts=$(mount)
+        for _mp in \
+            /compat/linux/dev     \
+            /compat/linux/dev/shm \
+            /compat/linux/dev/fd  \
+            /compat/linux/proc    \
+            /compat/linux/sys     \
+            /compat/linux/tmp     \
+            /compat/linux/home
+        do
+            if ! printf '%s\n' "$_mounts" | grep -q " on ${_mp} "; then
+                printf 'claude: warning: %s is not mounted\n' "$_mp" >&2
+                _mount_warn=1
+            fi
+        done
+        # fdescfs MUST have linrdlnk — without it claude hangs indefinitely on startup.
+        # mount(8) does not report fdescfs options in its output, so check /etc/fstab.
+        if printf '%s\n' "$_mounts" | grep -q " on /compat/linux/dev/fd "; then
+            if ! grep -vE '^[[:space:]]*#' /etc/fstab 2>/dev/null | \
+               grep -qE '[[:space:]]/compat/linux/dev/fd[[:space:]].*linrdlnk'; then
+                printf 'claude: warning: /compat/linux/dev/fd is mounted without linrdlnk — claude will hang on startup\n' >&2
+                printf 'claude:   /etc/fstab should read: fdescfs /compat/linux/dev/fd fdescfs rw,linrdlnk 0 0\n' >&2
+                printf 'claude:   then remount: umount /compat/linux/dev/fd && mount /compat/linux/dev/fd\n' >&2
+                _mount_warn=1
+            fi
+        fi
+        if [ "$_mount_warn" -eq 1 ]; then
+            printf 'claude: add missing/corrected entries to /etc/fstab, then: mount -a\n' >&2
+            printf 'claude:   devfs     /compat/linux/dev      devfs     rw\n' >&2
+            printf 'claude:   tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777\n' >&2
+            printf 'claude:   fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk\n' >&2
+            printf 'claude:   linprocfs /compat/linux/proc     linprocfs rw\n' >&2
+            printf 'claude:   linsysfs  /compat/linux/sys      linsysfs  rw\n' >&2
+            printf 'claude:   /tmp      /compat/linux/tmp      nullfs    rw\n' >&2
+            printf 'claude:   /home     /compat/linux/home     nullfs    rw\n' >&2
+            printf 'claude: Suppress: export CLAUDE_FBSD_NO_MOUNT_WARN=1\n' >&2
+        fi
     fi
-done
-# fdescfs MUST have linrdlnk — without it claude hangs indefinitely on startup.
-# mount(8) does not report fdescfs options in its output, so check /etc/fstab.
-if printf '%s\n' "$_mounts" | grep -q " on /compat/linux/dev/fd "; then
-    if ! grep -vE '^[[:space:]]*#' /etc/fstab 2>/dev/null | \
-       grep -qE '[[:space:]]/compat/linux/dev/fd[[:space:]].*linrdlnk'; then
-        printf 'claude: warning: /compat/linux/dev/fd is mounted without linrdlnk — claude will hang on startup\n' >&2
-        printf 'claude:   /etc/fstab should read: fdescfs /compat/linux/dev/fd fdescfs rw,linrdlnk 0 0\n' >&2
-        printf 'claude:   then remount: umount /compat/linux/dev/fd && mount /compat/linux/dev/fd\n' >&2
-        _mount_warn=1
-    fi
-fi
-if [ "$_mount_warn" -eq 1 ]; then
-    printf 'claude: add missing/corrected entries to /etc/fstab, then: mount -a\n' >&2
-    printf 'claude:   devfs     /compat/linux/dev      devfs     rw\n' >&2
-    printf 'claude:   tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777\n' >&2
-    printf 'claude:   fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk\n' >&2
-    printf 'claude:   linprocfs /compat/linux/proc     linprocfs rw\n' >&2
-    printf 'claude:   linsysfs  /compat/linux/sys      linsysfs  rw\n' >&2
-    printf 'claude:   /tmp      /compat/linux/tmp      nullfs    rw\n' >&2
-    printf 'claude:   /home     /compat/linux/home     nullfs    rw\n' >&2
 fi
 
 # Throttled update check: async, TTY stderr only, at most once per day per user.
