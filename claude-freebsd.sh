@@ -104,7 +104,7 @@ _D=/usr/local/libexec/claude-code
 # Suppress all mount warnings: export CLAUDE_FBSD_NO_MOUNT_WARN=1
 if [ -z "${CLAUDE_FBSD_NO_MOUNT_WARN:-}" ]; then
     _mount_warn=0
-    if sysctl -n security.jail.jailed 2>/dev/null | grep -q '^1'; then
+    if [ "$(sysctl -n security.jail.jailed 2>/dev/null)" = "1" ]; then
         # Inside a jail: mount(8) only reports the jail's own root dataset, not the
         # Linuxulator mounts configured by the host.  Check filesystem accessibility instead.
         for _check in \
@@ -152,14 +152,14 @@ if [ -z "${CLAUDE_FBSD_NO_MOUNT_WARN:-}" ]; then
             /compat/linux/tmp     \
             /compat/linux/home
         do
-            if ! printf '%s\n' "$_mounts" | grep -q " on ${_mp} "; then
-                printf 'claude: warning: %s is not mounted\n' "$_mp" >&2
-                _mount_warn=1
-            fi
+            case "$_mounts" in
+                *" on ${_mp} "*) ;;
+                *) printf 'claude: warning: %s is not mounted\n' "$_mp" >&2; _mount_warn=1 ;;
+            esac
         done
         # fdescfs MUST have linrdlnk — without it claude hangs indefinitely on startup.
         # mount(8) does not report fdescfs options in its output, so check /etc/fstab.
-        if printf '%s\n' "$_mounts" | grep -q " on /compat/linux/dev/fd "; then
+        case "$_mounts" in *" on /compat/linux/dev/fd "*)
             if ! grep -vE '^[[:space:]]*#' /etc/fstab 2>/dev/null | \
                grep -qE '[[:space:]]/compat/linux/dev/fd[[:space:]].*linrdlnk'; then
                 printf 'claude: warning: /compat/linux/dev/fd is mounted without linrdlnk — claude will hang on startup\n' >&2
@@ -167,7 +167,7 @@ if [ -z "${CLAUDE_FBSD_NO_MOUNT_WARN:-}" ]; then
                 printf 'claude:   then remount: umount /compat/linux/dev/fd && mount /compat/linux/dev/fd\n' >&2
                 _mount_warn=1
             fi
-        fi
+        esac
         if [ "$_mount_warn" -eq 1 ]; then
             printf 'claude: add missing/corrected entries to /etc/fstab, then: mount -a\n' >&2
             printf 'claude:   devfs     /compat/linux/dev      devfs     rw\n' >&2

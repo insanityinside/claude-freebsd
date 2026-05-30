@@ -21,7 +21,8 @@ without relying on the binary's own auto-updater (which cannot write to
 
 ## Tested on
 
-- FreeBSD 15.0-RELEASE-p5 amd64
+- FreeBSD 15.0-RELEASE-p5 amd64 (native)
+- FreeBSD 14.3 and 14.4 inside Bastille jails on a FreeBSD 15.0 host (not tested natively on 14.x)
 
 If you're running an older version of FreeBSD and run into problems, please
 [open an issue](https://github.com/insanityinside/claude-freebsd/issues) with
@@ -46,8 +47,12 @@ service linux start
 
 Claude Code will hang on startup if any of these are missing or misconfigured.
 The `fdescfs` entry **must** include `linrdlnk` — without it Claude hangs
-indefinitely on startup (FreeBSD's `mount` command does not display this option
-in its output; the tool checks `/etc/fstab` directly).
+indefinitely on startup (FreeBSD's `mount` does not display this option; the
+wrapper checks `/etc/fstab` on bare metal, or tests behaviorally inside jails).
+
+> **Jails:** These mounts must be configured by your jail manager (Bastille,
+> iocage, etc.) rather than `/etc/fstab` inside the jail. The wrapper detects
+> jail context automatically and adjusts its checks accordingly.
 
 ```
 devfs     /compat/linux/dev      devfs     rw
@@ -113,6 +118,12 @@ so. To suppress it:
 export CLAUDE_FBSD_NO_NOTIFY=1
 ```
 
+To suppress mount warnings (e.g. in a jail where the manager handles them):
+
+```sh
+export CLAUDE_FBSD_NO_MOUNT_WARN=1
+```
+
 ### Selecting a release channel
 
 The channel choice is **persistent** — setting it once with `--channel` saves
@@ -174,7 +185,8 @@ The wrapper at `/usr/local/bin/claude`:
 - Sets `DISABLE_AUTOUPDATER=1` and `DISABLE_UPDATES=1` before exec'ing the
   binary, preventing Claude Code from attempting to update itself
 - Checks that all required Linuxulator mounts are present and warns on stderr
-  if any are missing or misconfigured
+  if any are missing or misconfigured; detects jail context and adjusts checks
+  accordingly (set `CLAUDE_FBSD_NO_MOUNT_WARN=1` to suppress)
 - Performs a throttled background check (at most once per day, 2-second timeout)
   and prints a nudge if a newer release is available
 
