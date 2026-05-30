@@ -9,16 +9,18 @@
 # at /usr/local/bin/claude that disables the binary's own auto-updater.
 #
 # Usage:
-#   claude-freebsd --install [OPTIONS]   install Claude Code (and this tool)
-#   claude-freebsd --update  [OPTIONS]   update Claude Code to latest
-#   claude-freebsd --help                show this help
+#   claude-freebsd --install     [OPTIONS]  install Claude Code (and this tool)
+#   claude-freebsd --update      [OPTIONS]  update Claude Code to latest
+#   claude-freebsd --uninstall              remove Claude Code and this tool
+#   claude-freebsd --self-update            update this tool from GitHub
+#   claude-freebsd --help                   show this help
 #
 # Options (for --install / --update):
 #   --channel latest|stable  release channel to track (default: latest)
 #   --version X.Y.Z          install a specific version instead
 #   --force                  reinstall even if already at the target version
 #
-# Root is required for --install and --update.
+# Root is required for --install, --update, --uninstall, and --self-update.
 # Suppress the per-launch "update available" nudge:  CLAUDE_FBSD_NO_NOTIFY=1
 
 set -eu
@@ -26,6 +28,8 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
+SCRIPT_VERSION="1.0.0"
+GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
 REAL_BIN="$REAL_DIR/claude"
@@ -34,6 +38,8 @@ WRAPPER="/usr/local/bin/claude"
 PLATFORM="linux-x64"
 
 DOWNLOAD_BASE="https://downloads.claude.ai/claude-code-releases"
+GITHUB_API="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+GITHUB_RAW="https://raw.githubusercontent.com/$GITHUB_REPO"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -46,10 +52,11 @@ usage() {
 claude-freebsd — install and manage Claude Code on FreeBSD via Linuxulator
 
 Usage:
-  $PROG --install   [OPTIONS]  install Claude Code (and this tool)
-  $PROG --update    [OPTIONS]  update Claude Code to latest
-  $PROG --uninstall            remove Claude Code, the wrapper, and this tool
-  $PROG --help                 show this help
+  $PROG --install     [OPTIONS]  install Claude Code (and this tool)
+  $PROG --update      [OPTIONS]  update Claude Code to latest
+  $PROG --uninstall              remove Claude Code, the wrapper, and this tool
+  $PROG --self-update            update this tool from GitHub
+  $PROG --help                   show this help
 
 Options (for --install / --update):
   --channel latest|stable  release channel to track (default: latest)
@@ -72,6 +79,29 @@ The fdescfs entry MUST include linrdlnk or claude will hang on startup.
 
 Suppress the per-launch "update available" nudge:  CLAUDE_FBSD_NO_NOTIFY=1
 EOF
+}
+
+# Throttled check for a newer manager release on GitHub (at most once per day).
+# Prints a one-line notice if a newer tag exists; never fatal.
+check_manager_update() {
+    _mstamp="${HOME:-/tmp}/.claude-freebsd-lastcheck"
+    _do=0
+    if [ ! -e "$_mstamp" ]; then
+        _do=1
+    else
+        _now=$(date +%s 2>/dev/null || echo 0)
+        _then=$(stat -f %m "$_mstamp" 2>/dev/null || echo 0)
+        [ "$(( _now - _then ))" -gt 86400 ] && _do=1
+    fi
+    [ "$_do" -eq 0 ] && return 0
+    _gh_ver=$(fetch -qT3 -o - "$GITHUB_API" 2>/dev/null | \
+        sed -n 's/.*"tag_name": *"v*\([^"]*\)".*/\1/p' | head -1 || true)
+    : > "$_mstamp" 2>/dev/null || true
+    [ -z "$_gh_ver" ] && return 0
+    [ "$_gh_ver" = "$SCRIPT_VERSION" ] && return 0
+    printf '\n'
+    info "Manager update available: v$SCRIPT_VERSION -> v$_gh_ver"
+    info "  Run: sudo $PROG --self-update"
 }
 
 # Fetch URL to dest file; dies on failure.
@@ -103,9 +133,10 @@ force=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --install)   action=install ;;
-        --update)    action=update ;;
-        --uninstall) action=uninstall ;;
+        --install)      action=install ;;
+        --update)       action=update ;;
+        --uninstall)    action=uninstall ;;
+        --self-update)  action=selfupdate ;;
         --channel)
             [ $# -ge 2 ] || die "--channel requires an argument (latest or stable)"
             shift; channel="$1"
@@ -147,9 +178,12 @@ if [ "$(id -u)" -ne 0 ]; then
     printf '%s: --%s requires root. Re-run with sudo or doas:\n\n' "$PROG" "$action" >&2
     # Print the exact command to repeat, including any options passed
     _cmd="sudo $self --$action"
-    [ "$channel" != "latest" ] && _cmd="$_cmd --channel $channel"
-    [ -n "$pinver" ]           && _cmd="$_cmd --version $pinver"
-    [ "$force" -eq 1 ]         && _cmd="$_cmd --force"
+    # --channel / --version / --force only apply to install and update
+    if [ "$action" = "install" ] || [ "$action" = "update" ]; then
+        [ "$channel" != "latest" ] && _cmd="$_cmd --channel $channel"
+        [ -n "$pinver" ]           && _cmd="$_cmd --version $pinver"
+        [ "$force" -eq 1 ]         && _cmd="$_cmd --force"
+    fi
     printf '    %s\n\n' "$_cmd" >&2
     exit 1
 fi
@@ -194,6 +228,28 @@ if [ "$action" = "uninstall" ]; then
     fi
     printf '\n'
     info "Done. User config (~/.claude/) was not touched."
+    check_manager_update
+    exit 0
+fi
+
+# ── self-update ───────────────────────────────────────────────────────────────
+
+if [ "$action" = "selfupdate" ]; then
+    info "Checking GitHub for manager updates (current: v$SCRIPT_VERSION)..."
+    _gh_ver=$(fetch -qT10 -o - "$GITHUB_API" 2>/dev/null | \
+        sed -n 's/.*"tag_name": *"v*\([^"]*\)".*/\1/p' | head -1 || true)
+    [ -z "$_gh_ver" ] && die "could not fetch release info from GitHub"
+    if [ "$_gh_ver" = "$SCRIPT_VERSION" ]; then
+        info "Already at latest manager version (v$SCRIPT_VERSION)."
+        exit 0
+    fi
+    [ -e "$SELF_PATH" ] || die "$SELF_PATH not found — run --install first"
+    info "Updating manager: v$SCRIPT_VERSION -> v$_gh_ver"
+    _tmpscript=$(mktemp /tmp/claude-freebsd-update.XXXXXX)
+    trap 'rm -f "$_tmpscript"' EXIT
+    fetch_to "$GITHUB_RAW/v${_gh_ver}/claude-freebsd.sh" "$_tmpscript"
+    install -m 755 "$_tmpscript" "$SELF_PATH"
+    info "Manager updated to v$_gh_ver at $SELF_PATH"
     exit 0
 fi
 
@@ -445,3 +501,4 @@ if [ "$need_selfinstall" -eq 1 ]; then
 else
     info "To update:  sudo claude-freebsd --update"
 fi
+check_manager_update

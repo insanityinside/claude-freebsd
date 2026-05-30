@@ -105,18 +105,6 @@ so. To suppress it:
 export CLAUDE_FBSD_NO_NOTIFY=1
 ```
 
-### Updating this tool
-
-If a new version of `claude-freebsd.sh` is published, running `--install` from the
-newly downloaded script will update both the manager and the wrapper, even if
-Claude Code itself is already current:
-
-```sh
-fetch https://raw.githubusercontent.com/insanityinside/claude-freebsd/main/claude-freebsd.sh
-chmod +x claude-freebsd.sh
-sudo ./claude-freebsd.sh --install
-```
-
 ### Tracking the stable channel
 
 ```sh
@@ -128,6 +116,17 @@ sudo claude-freebsd --update --channel stable
 ```sh
 sudo claude-freebsd --update --version 2.1.100
 ```
+
+### Updating this tool
+
+```sh
+sudo claude-freebsd --self-update
+```
+
+Downloads the latest tagged release from GitHub and replaces
+`/usr/local/bin/claude-freebsd`. After any `--install`, `--update`, or
+`--uninstall` run, the tool also checks GitHub (at most once per day) and
+prints a one-line notice if a newer version is available.
 
 ### Uninstalling
 
