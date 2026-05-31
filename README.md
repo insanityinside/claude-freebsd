@@ -13,15 +13,11 @@ From version 2.1.113 onward the npm package no longer contains runnable
 JavaScript — it only pulls a per-platform compiled binary, and FreeBSD is not
 among the supported targets.
 
-The official `linux-x64` binary runs unmodified under FreeBSD's Linux ABI
-(Linuxulator), confirmed on FreeBSD 15.0-RELEASE amd64. This tool automates
-the fetch, verification, and installation of that binary, and keeps it updated
-without relying on the binary's own auto-updater (which cannot write to
+The official `linux-x64` (amd64) and `linux-arm64` (aarch64) binaries run
+unmodified under FreeBSD's Linux ABI (Linuxulator). This tool automates the
+fetch, verification, and installation of the appropriate binary, and keeps it
+updated without relying on the binary's own auto-updater (which cannot write to
 `/usr/local/bin` as a normal user anyway).
-
-aarch64 support is not yet implemented — the script currently requires amd64.
-FreeBSD's Linuxulator does support arm64 and Anthropic ships a
-`linux-aarch64` binary, so support is planned once tested.
 
 ## Tested on
 
@@ -29,6 +25,7 @@ FreeBSD's Linuxulator does support arm64 and Anthropic ships a
 - FreeBSD 14.4-RELEASE amd64 (native)
 - FreeBSD 14.3-RELEASE amd64 (native)
 - FreeBSD 14.3 and 14.4 inside Bastille jails on a FreeBSD 15.0 host
+- FreeBSD 15.0-RELEASE arm64 (QEMU VM — not tested on real aarch64 hardware)
 
 If you're running an older version of FreeBSD and run into problems, please
 [open an issue](https://github.com/insanityinside/claude-freebsd/issues) with
@@ -36,15 +33,16 @@ your FreeBSD version and the output of the failing command.
 
 ## Requirements
 
-- FreeBSD **amd64** (aarch64 support is planned but not yet implemented)
+- FreeBSD **amd64** or **arm64**
 - Linuxulator enabled (`linux64` kernel module or built-in)
-- `linux_base-rl9` package (provides the glibc runtime the binary links against)
+- `linux_base-rl9` package (provides the glibc runtime the binary links against);
+  `linux_base-cl7` also works but is deprecated (CentOS 7 EOL)
 - Root access for installation and updates
 
 ### One-time Linuxulator setup
 
 ```sh
-pkg install -y linux_base-rl9
+pkg install -y linux_base-rl9   # or linux_base-cl7 (deprecated, CentOS 7 EOL)
 sysrc linux_enable=YES
 service linux start
 ```
@@ -81,6 +79,21 @@ linsysfs  /compat/linux/sys      linsysfs  rw,late
 > ```
 > /home/username  /compat/linux/home/username  nullfs  rw,late
 > ```
+
+> **Missing mountpoints:** `/compat/linux/tmp` and `/compat/linux/home` are not
+> created by the `linux_base` packages. If they do not exist when FreeBSD boots,
+> the nullfs mounts will fail — which can hang the system at startup. The
+> `claude-freebsd --install` script creates them automatically; if you are
+> setting up fstab manually, create them first:
+>
+> ```sh
+> mkdir -p /compat/linux/tmp /compat/linux/home
+> ```
+>
+> Alternatively, add `failok` to those two fstab options (e.g.
+> `nullfs rw,late,failok`) to prevent boot hangs if the directories are absent —
+> but be aware that Claude Code will hang on startup if the mounts have not been
+> established.
 
 After editing `/etc/fstab`, mount everything:
 

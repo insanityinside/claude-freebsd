@@ -5,8 +5,9 @@
 #
 # claude-freebsd — install and manage Claude Code on FreeBSD via Linuxulator
 #
-# The official Claude Code linux-x64 native binary runs unmodified under
-# FreeBSD's Linux ABI (Linuxulator).  This tool fetches that binary from
+# The official Claude Code linux-x64 (amd64) and linux-arm64 (aarch64) native
+# binaries run unmodified under FreeBSD's Linux ABI (Linuxulator).  This tool
+# fetches the appropriate binary from
 # Anthropic's download infrastructure (downloads.claude.ai), verifies its
 # SHA256 against the signed manifest, and installs it behind a thin wrapper
 # at /usr/local/bin/claude that disables the binary's own auto-updater.
@@ -31,14 +32,18 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.7"
+SCRIPT_VERSION="1.0.8"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
 REAL_BIN="$REAL_DIR/claude"
 VER_FILE="$REAL_DIR/version"
 WRAPPER="/usr/local/bin/claude"
-PLATFORM="linux-x64"
+case "$(uname -m)" in
+    amd64) PLATFORM="linux-x64" ;;
+    arm64) PLATFORM="linux-arm64" ;;
+    *)     PLATFORM="unknown" ;;
+esac
 
 DOWNLOAD_BASE="https://downloads.claude.ai/claude-code-releases"
 GITHUB_API="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
@@ -67,7 +72,7 @@ Options (for --install / --update):
   --force                  reinstall even if already at the target version
 
 Requirements:
-  FreeBSD amd64, Linuxulator active (linux64 kmod + linux_base-rl9), root.
+  FreeBSD amd64 or arm64, Linuxulator active (linux64 kmod + linux_base-rl9 or linux_base-cl7), root.
 
 The following /etc/fstab entries are required for Claude Code to run correctly.
 The fdescfs entry MUST include linrdlnk or claude will hang on startup.
@@ -351,8 +356,10 @@ fi
 
 [ "$(uname -s)" = FreeBSD ] \
     || die "FreeBSD only (this host reports: $(uname -s))"
-[ "$(uname -m)" = amd64 ] \
-    || die "amd64 only — the linux-x64 binary requires Linuxulator on amd64 (got $(uname -m))"
+case "$(uname -m)" in
+    amd64|arm64) ;;
+    *) die "unsupported architecture: $(uname -m) (supported: amd64, arm64)" ;;
+esac
 
 # ── uninstall ─────────────────────────────────────────────────────────────────
 
@@ -392,7 +399,6 @@ if [ "$action" = "uninstall" ]; then
     fi
     printf '\n'
     info "Done. User config (~/.claude/) was not touched."
-    check_manager_update
     exit 0
 fi
 
@@ -430,7 +436,7 @@ if ! kldstat -q -n linux64.ko 2>/dev/null && \
    ! sysctl -n compat.linux.osrelease >/dev/null 2>&1; then
     printf '%s: Linuxulator does not appear to be active.\n' "$PROG" >&2
     printf '\nOne-time setup (as root):\n' >&2
-    printf '    pkg install -y linux_base-rl9\n' >&2
+    printf '    pkg install -y linux_base-rl9   # or linux_base-cl7 (deprecated, CentOS 7 EOL)\n' >&2
     printf '    sysrc linux_enable=YES\n' >&2
     printf '    service linux start\n\n' >&2
     exit 1
@@ -441,7 +447,7 @@ fi
 # the package name so this works however glibc was provisioned.
 if [ ! -f /compat/linux/lib64/libc.so.6 ]; then
     printf '%s: Linux glibc runtime not found at /compat/linux/lib64/libc.so.6.\n' "$PROG" >&2
-    printf '    Install it:  pkg install -y linux_base-rl9\n\n' >&2
+    printf '    Install it:  pkg install -y linux_base-rl9   # or linux_base-cl7 (deprecated, CentOS 7 EOL)\n\n' >&2
     exit 1
 fi
 
@@ -552,6 +558,9 @@ fi
 
 info "Installing Claude Code..."
 mkdir -p "$REAL_DIR" /usr/local/share/claude-freebsd
+# These mountpoints are not created by linux_base packages; nullfs mounts will
+# silently fail at boot (or hang the system) if the target directories are absent.
+mkdir -p /compat/linux/tmp /compat/linux/home
 install -m 755 "$binary" "$REAL_BIN"
 printf '%s\n' "$ver" > "$VER_FILE"
 printf '%s\n' "$channel" > "$CHANNEL_FILE"
