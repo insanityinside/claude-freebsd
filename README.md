@@ -25,7 +25,7 @@ updated without relying on the binary's own auto-updater (which cannot write to
 - FreeBSD 14.4-RELEASE amd64 (native)
 - FreeBSD 14.3-RELEASE amd64 (native)
 - FreeBSD 14.3 and 14.4 inside Bastille jails on a FreeBSD 15.0 host
-- FreeBSD 15.0-RELEASE arm64 (QEMU VM — not tested on real aarch64 hardware)
+- FreeBSD 15.0-RELEASE arm64 (QEMU VM — not tested on real aarch64 hardware yet)
 
 If you're running an older version of FreeBSD and run into problems, please
 [open an issue](https://github.com/insanityinside/claude-freebsd/issues) with
@@ -141,18 +141,24 @@ Options (for --install / --update):
 sudo claude-freebsd --update
 ```
 
-The wrapper installed at `/usr/local/bin/claude` checks once per day (per user)
-whether a newer release is available and prints a one-line notice on stderr if
-so. To suppress it:
+The wrapper checks once per day (per user) whether a newer release is available
+and prints a one-line notice on stderr if so. To suppress it, set
+`CLAUDE_FBSD_NO_NOTIFY=1` — see [Wrapper environment variables](#wrapper-environment-variables) below.
+
+### Wrapper environment variables
+
+Two environment variables control optional wrapper behaviour:
+
+| Variable | Effect |
+|---|---|
+| `CLAUDE_FBSD_NO_NOTIFY=1` | Suppress the once-per-day update-available nudge |
+| `CLAUDE_FBSD_NO_MOUNT_WARN=1` | Suppress mount-check warnings (e.g. in a jail where the manager handles mounts) |
+
+Set persistently in your shell profile, or prefix a single invocation to
+suppress for one run only:
 
 ```sh
-export CLAUDE_FBSD_NO_NOTIFY=1
-```
-
-To suppress mount warnings (e.g. in a jail where the manager handles them):
-
-```sh
-export CLAUDE_FBSD_NO_MOUNT_WARN=1
+CLAUDE_FBSD_NO_MOUNT_WARN=1 claude
 ```
 
 ### Selecting a release channel
