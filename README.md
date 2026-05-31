@@ -19,10 +19,16 @@ the fetch, verification, and installation of that binary, and keeps it updated
 without relying on the binary's own auto-updater (which cannot write to
 `/usr/local/bin` as a normal user anyway).
 
+aarch64 support is not yet implemented — the script currently requires amd64.
+FreeBSD's Linuxulator does support arm64 and Anthropic ships a
+`linux-aarch64` binary, so support is planned once tested.
+
 ## Tested on
 
 - FreeBSD 15.0-RELEASE-p5 amd64 (native)
-- FreeBSD 14.3 and 14.4 inside Bastille jails on a FreeBSD 15.0 host (not tested natively on 14.x)
+- FreeBSD 14.4-RELEASE amd64 (native)
+- FreeBSD 14.3-RELEASE amd64 (native)
+- FreeBSD 14.3 and 14.4 inside Bastille jails on a FreeBSD 15.0 host
 
 If you're running an older version of FreeBSD and run into problems, please
 [open an issue](https://github.com/insanityinside/claude-freebsd/issues) with
@@ -30,7 +36,7 @@ your FreeBSD version and the output of the failing command.
 
 ## Requirements
 
-- FreeBSD **amd64** (the linux-x64 binary requires Linuxulator on amd64)
+- FreeBSD **amd64** (aarch64 support is planned but not yet implemented)
 - Linuxulator enabled (`linux64` kernel module or built-in)
 - `linux_base-rl9` package (provides the glibc runtime the binary links against)
 - Root access for installation and updates
@@ -63,6 +69,18 @@ linsysfs  /compat/linux/sys      linsysfs  rw
 /tmp      /compat/linux/tmp      nullfs    rw
 /home     /compat/linux/home     nullfs    rw
 ```
+
+> **ZFS per-user home directories:** If FreeBSD created a separate ZFS dataset
+> for a user's home directory (e.g. `zroot/home/username` mounted at
+> `/home/username`), the `/home` nullfs entry above will **not** expose it
+> inside `/compat/linux/home` — nullfs mounts are not recursive across
+> submounts. Claude hangs on startup if it cannot access the home directory of
+> the user that launched it. Add a dedicated nullfs entry for each affected
+> user:
+>
+> ```
+> /home/username  /compat/linux/home/username  nullfs  rw
+> ```
 
 After editing `/etc/fstab`, mount everything:
 
