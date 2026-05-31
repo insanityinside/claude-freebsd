@@ -42,9 +42,9 @@ your FreeBSD version and the output of the failing command.
 ### One-time Linuxulator setup
 
 ```sh
-pkg install -y linux_base-rl9   # or linux_base-cl7 (deprecated, CentOS 7 EOL)
 sysrc linux_enable=YES
 service linux start
+pkg install -y linux_base-rl9   # or linux_base-cl7 (deprecated, CentOS 7 EOL)
 ```
 
 ### Required `/etc/fstab` entries
