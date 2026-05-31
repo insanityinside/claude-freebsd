@@ -61,13 +61,13 @@ wrapper checks `/etc/fstab` on bare metal, or tests behaviorally inside jails).
 > jail context automatically and adjusts its checks accordingly.
 
 ```
-devfs     /compat/linux/dev      devfs     rw
-tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777
-fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk
-linprocfs /compat/linux/proc     linprocfs rw
-linsysfs  /compat/linux/sys      linsysfs  rw
-/tmp      /compat/linux/tmp      nullfs    rw
-/home     /compat/linux/home     nullfs    rw
+devfs     /compat/linux/dev      devfs     rw,late
+tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777,late
+fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk,late
+linprocfs /compat/linux/proc     linprocfs rw,late
+linsysfs  /compat/linux/sys      linsysfs  rw,late
+/tmp      /compat/linux/tmp      nullfs    rw,late
+/home     /compat/linux/home     nullfs    rw,late
 ```
 
 > **ZFS per-user home directories:** If FreeBSD created a separate ZFS dataset
@@ -79,7 +79,7 @@ linsysfs  /compat/linux/sys      linsysfs  rw
 > user:
 >
 > ```
-> /home/username  /compat/linux/home/username  nullfs  rw
+> /home/username  /compat/linux/home/username  nullfs  rw,late
 > ```
 
 After editing `/etc/fstab`, mount everything:

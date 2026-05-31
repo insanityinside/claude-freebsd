@@ -72,13 +72,19 @@ Requirements:
 The following /etc/fstab entries are required for Claude Code to run correctly.
 The fdescfs entry MUST include linrdlnk or claude will hang on startup.
 
-  devfs     /compat/linux/dev      devfs     rw
-  tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777
-  fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk
-  linprocfs /compat/linux/proc     linprocfs rw
-  linsysfs  /compat/linux/sys      linsysfs  rw
-  /tmp      /compat/linux/tmp      nullfs    rw
-  /home     /compat/linux/home     nullfs    rw
+  devfs     /compat/linux/dev      devfs     rw,late
+  tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777,late
+  fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk,late
+  linprocfs /compat/linux/proc     linprocfs rw,late
+  linsysfs  /compat/linux/sys      linsysfs  rw,late
+  /tmp      /compat/linux/tmp      nullfs    rw,late
+  /home     /compat/linux/home     nullfs    rw,late
+
+If your system has per-user ZFS datasets for home directories (e.g. zroot/home/username),
+add a separate nullfs entry for each one -- nullfs mounts are not recursive and the /home
+entry above will not expose submounted datasets:
+
+  /home/username  /compat/linux/home/username  nullfs  rw,late
 
 Suppress the per-launch "update available" nudge:  CLAUDE_FBSD_NO_NOTIFY=1
 EOF
