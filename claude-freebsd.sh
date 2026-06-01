@@ -32,7 +32,7 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.8"
+SCRIPT_VERSION="1.0.9"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
@@ -82,12 +82,12 @@ The fdescfs entry MUST include linrdlnk or claude will hang on startup.
   fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk,late
   linprocfs /compat/linux/proc     linprocfs rw,late
   linsysfs  /compat/linux/sys      linsysfs  rw,late
-  /tmp      /compat/linux/tmp      nullfs    rw,late
-  /home     /compat/linux/home     nullfs    rw,late
 
-If your system has per-user ZFS datasets for home directories (e.g. zroot/home/username),
-add a separate nullfs entry for each one -- nullfs mounts are not recursive and the /home
-entry above will not expose submounted datasets:
+The /tmp and /home nullfs mounts from the FreeBSD handbook are not required --
+the Linuxulator's path fallthrough handles both. If you have /home mounted as a
+nullfs under /compat/linux/home and claude hangs on startup with fdescfs correct,
+check for ZFS per-user home datasets: nullfs mounts are not recursive, so add a
+separate entry for each affected user:
 
   /home/username  /compat/linux/home/username  nullfs  rw,late
 
@@ -123,9 +123,7 @@ if [ -z "${CLAUDE_FBSD_NO_MOUNT_WARN:-}" ]; then
             "/compat/linux/dev/shm:/compat/linux/dev/shm" \
             "/compat/linux/dev/fd:/compat/linux/dev/fd" \
             "/compat/linux/proc:/compat/linux/proc/version" \
-            "/compat/linux/sys:/compat/linux/sys/kernel" \
-            "/compat/linux/tmp:/compat/linux/tmp" \
-            "/compat/linux/home:/compat/linux/home"
+            "/compat/linux/sys:/compat/linux/sys/kernel"
         do
             _mp="${_check%%:*}"
             _indicator="${_check#*:}"
@@ -159,9 +157,7 @@ if [ -z "${CLAUDE_FBSD_NO_MOUNT_WARN:-}" ]; then
             /compat/linux/dev/shm \
             /compat/linux/dev/fd  \
             /compat/linux/proc    \
-            /compat/linux/sys     \
-            /compat/linux/tmp     \
-            /compat/linux/home
+            /compat/linux/sys
         do
             case "$_mounts" in
                 *" on ${_mp} "*) ;;
@@ -186,8 +182,6 @@ if [ -z "${CLAUDE_FBSD_NO_MOUNT_WARN:-}" ]; then
             printf 'claude:   fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk\n' >&2
             printf 'claude:   linprocfs /compat/linux/proc     linprocfs rw\n' >&2
             printf 'claude:   linsysfs  /compat/linux/sys      linsysfs  rw\n' >&2
-            printf 'claude:   /tmp      /compat/linux/tmp      nullfs    rw\n' >&2
-            printf 'claude:   /home     /compat/linux/home     nullfs    rw\n' >&2
             printf 'claude: Suppress: export CLAUDE_FBSD_NO_MOUNT_WARN=1\n' >&2
         fi
     fi
@@ -558,9 +552,6 @@ fi
 
 info "Installing Claude Code..."
 mkdir -p "$REAL_DIR" /usr/local/share/claude-freebsd
-# These mountpoints are not created by linux_base packages; nullfs mounts will
-# silently fail at boot (or hang the system) if the target directories are absent.
-mkdir -p /compat/linux/tmp /compat/linux/home
 install -m 755 "$binary" "$REAL_BIN"
 printf '%s\n' "$ver" > "$VER_FILE"
 printf '%s\n' "$channel" > "$CHANNEL_FILE"

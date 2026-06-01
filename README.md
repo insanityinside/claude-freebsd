@@ -64,36 +64,19 @@ tmpfs     /compat/linux/dev/shm  tmpfs     rw,size=1g,mode=1777,late
 fdescfs   /compat/linux/dev/fd   fdescfs   rw,linrdlnk,late
 linprocfs /compat/linux/proc     linprocfs rw,late
 linsysfs  /compat/linux/sys      linsysfs  rw,late
-/tmp      /compat/linux/tmp      nullfs    rw,late
-/home     /compat/linux/home     nullfs    rw,late
 ```
 
-> **ZFS per-user home directories:** If FreeBSD created a separate ZFS dataset
-> for a user's home directory (e.g. `zroot/home/username` mounted at
-> `/home/username`), the `/home` nullfs entry above will **not** expose it
-> inside `/compat/linux/home` — nullfs mounts are not recursive across
-> submounts. Claude hangs on startup if it cannot access the home directory of
-> the user that launched it. Add a dedicated nullfs entry for each affected
-> user:
+The `/tmp` and `/home` nullfs mounts from the FreeBSD handbook are **not
+required** — the Linuxulator's path fallthrough handles both.
+
+> **Hang on startup with fdescfs correct?** If `claude` hangs and `fdescfs` is
+> correctly mounted with `linrdlnk`, an existing `/home` nullfs mount without
+> per-user ZFS dataset entries is the likely cause. nullfs mounts are not
+> recursive — add a dedicated entry for each affected user:
 >
 > ```
 > /home/username  /compat/linux/home/username  nullfs  rw,late
 > ```
-
-> **Missing mountpoints:** `/compat/linux/tmp` and `/compat/linux/home` are not
-> created by the `linux_base` packages. If they do not exist when FreeBSD boots,
-> the nullfs mounts will fail — which can hang the system at startup. The
-> `claude-freebsd --install` script creates them automatically; if you are
-> setting up fstab manually, create them first:
->
-> ```sh
-> mkdir -p /compat/linux/tmp /compat/linux/home
-> ```
->
-> Alternatively, add `failok` to those two fstab options (e.g.
-> `nullfs rw,late,failok`) to prevent boot hangs if the directories are absent —
-> but be aware that Claude Code will hang on startup if the mounts have not been
-> established.
 
 After editing `/etc/fstab`, mount everything:
 
