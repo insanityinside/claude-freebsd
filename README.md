@@ -66,13 +66,10 @@ linprocfs /compat/linux/proc     linprocfs rw,late
 linsysfs  /compat/linux/sys      linsysfs  rw,late
 ```
 
-The `/tmp` and `/home` nullfs mounts from the FreeBSD handbook are **not
-required** — the Linuxulator's path fallthrough handles both.
-
 > **Hang on startup with fdescfs correct?** If `claude` hangs and `fdescfs` is
-> correctly mounted with `linrdlnk`, an existing `/home` nullfs mount without
-> per-user ZFS dataset entries is the likely cause. nullfs mounts are not
-> recursive — add a dedicated entry for each affected user:
+> correctly mounted with `linrdlnk`, an existing `/home` nullfs mount to
+> `/compat/linux/home` without per-user ZFS dataset entries is the likely cause.
+> nullfs mounts are not recursive — add a dedicated entry for each affected user:
 >
 > ```
 > /home/username  /compat/linux/home/username  nullfs  rw,late

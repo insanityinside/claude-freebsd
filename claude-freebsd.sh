@@ -32,7 +32,7 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.9"
+SCRIPT_VERSION="1.0.9.1"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
@@ -83,11 +83,9 @@ The fdescfs entry MUST include linrdlnk or claude will hang on startup.
   linprocfs /compat/linux/proc     linprocfs rw,late
   linsysfs  /compat/linux/sys      linsysfs  rw,late
 
-The /tmp and /home nullfs mounts from the FreeBSD handbook are not required --
-the Linuxulator's path fallthrough handles both. If you have /home mounted as a
-nullfs under /compat/linux/home and claude hangs on startup with fdescfs correct,
-check for ZFS per-user home datasets: nullfs mounts are not recursive, so add a
-separate entry for each affected user:
+If you have /home mounted as a nullfs under /compat/linux/home and claude hangs
+on startup with fdescfs correct, check for ZFS per-user home datasets: nullfs
+mounts are not recursive, so add a separate entry for each affected user:
 
   /home/username  /compat/linux/home/username  nullfs  rw,late
 
