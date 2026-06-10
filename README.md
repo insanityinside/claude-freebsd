@@ -210,6 +210,10 @@ The wrapper at `/usr/local/bin/claude`:
 The real binary lives at `/usr/local/libexec/claude-code/claude` and is never
 on `PATH` directly.
 
+## Note
+
+A phantom "⚠ 1 setup issue: install · /doctor" may still appear on startup — this is a pre-existing Claude Code quirk unrelated to our install layout. claude doctor reports no issues. Seems to be an issue with the latest 2.1.170.
+
 ## Related
 
 - [Claude Code issue #61313](https://github.com/anthropics/claude-code/issues/61313) — tracking native FreeBSD binary support

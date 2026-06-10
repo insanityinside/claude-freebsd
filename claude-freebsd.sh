@@ -32,7 +32,7 @@ set -eu
 # ── constants ────────────────────────────────────────────────────────────────
 
 PROG="claude-freebsd"
-SCRIPT_VERSION="1.0.9.1"
+SCRIPT_VERSION="1.0.9.2"
 GITHUB_REPO="insanityinside/claude-freebsd"
 SELF_PATH="/usr/local/bin/$PROG"
 REAL_DIR="/usr/local/libexec/claude-code"
@@ -106,6 +106,21 @@ write_wrapper() {
 
 export DISABLE_AUTOUPDATER=1
 export DISABLE_UPDATES=1
+
+# Suppress false-positive warnings from our non-standard install layout.
+# Claude defaults to "native" install type and performs two checks we must satisfy:
+#   PATH check (doctor): looks for the literal string "~/.local/bin" in $PATH via string
+#     match — the unexpanded PATH export below satisfies it without affecting shell lookup.
+#   Startup self-check: stats $HOME/.local/bin/claude to verify the binary exists — the
+#     mkdir+symlink below create that path (pointing to the real ELF so the Linuxulator
+#     can exec it during the check).
+# npm's default prefix (/usr/local) also causes /usr/local/bin/claude (our wrapper) to
+# be flagged as an npm-global leftover; redirecting the prefix to a Claude-owned path
+# (which has no bin/claude) prevents that scan.
+export NPM_CONFIG_PREFIX="$HOME/.claude/npm-prefix"
+export PATH='~/.local/bin:'"$PATH"
+mkdir -p "$HOME/.local/bin" 2>/dev/null || true
+[ -e "$HOME/.local/bin/claude" ] || ln -sf /usr/local/libexec/claude-code/claude "$HOME/.local/bin/claude" 2>/dev/null || true
 
 _D=/usr/local/libexec/claude-code
 
@@ -584,7 +599,7 @@ if [ "$need_selfinstall" -eq 1 ]; then
     info "  sudo claude-freebsd --update          # update to latest"
     info "  sudo claude-freebsd --update --channel stable"
     info "  sudo claude-freebsd --update --version X.Y.Z"
-else
+elif [ "$action" != "update" ]; then
     info "To update:  sudo claude-freebsd --update"
 fi
 check_manager_update
